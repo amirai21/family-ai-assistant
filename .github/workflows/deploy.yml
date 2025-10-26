@@ -54,4 +54,5 @@ jobs:
             --image "${IMAGE_URI}" \
             --region "${{ env.REGION }}" \
             --platform managed \
-            --allow-unauthenticated
+            --allow-unauthenticated \
+            --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }}"

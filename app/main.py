@@ -5,12 +5,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router as api_router
+from app.core.database import init_db, close_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # initialize resources here (db, clients, caches)
+    await init_db()
     yield
     # clean up resources here
+    await close_db()
 
 def create_app() -> FastAPI:
     app = FastAPI(

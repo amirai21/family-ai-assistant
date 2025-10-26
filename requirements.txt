@@ -1,7 +1,8 @@
 fastapi
 uvicorn[standard]
 python-dotenv
-sqlalchemy
+sqlalchemy[asyncio]
 alembic
-psycopg2-binary
+asyncpg
+pydantic-settings
 apscheduler
