@@ -8,7 +8,13 @@ from alembic import context
 # Import Base and models
 from app.core.database import Base
 from app.core.config import get_settings
-from app.models.user import User  # noqa: F401 - imported for metadata
+
+# Import ALL models for Alembic metadata discovery
+from app.models.user import User  # noqa: F401
+from app.models.family import Family  # noqa: F401
+from app.models.family_member import FamilyMember  # noqa: F401
+from app.models.task import Task  # noqa: F401
+from app.models.reminder import Reminder  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

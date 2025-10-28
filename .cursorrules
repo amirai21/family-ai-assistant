@@ -1,0 +1,38 @@
+# Project Context: AI Family Assistant App
+
+## Overview
+This is a family household management application with AI assistant integration. The app helps parents/couples manage household operations including tasks, shopping, schedules, bills, and children's activities.
+
+## Core Features
+- Task and chore management with assignments
+- Shopping lists and grocery management
+- Family calendar and scheduling (school, activities, appointments)
+- Bill tracking and payment reminders
+- Children's activity coordination (school pickups, hobbies)
+- AI assistant that orchestrates household activities and suggests optimizations
+
+## Database Architecture Guidelines
+When working on database schema:
+- Design for multi-family/multi-household support
+- Include audit fields (created_at, updated_at, created_by, updated_by)
+- Use soft deletes where appropriate
+- Normalize to 3NF where it makes sense
+- Include tables for AI context and conversation history
+- Support recurring patterns (tasks, events, bills)
+- Track relationships between family members and their responsibilities
+
+## Tech Stack
+FastAPI, postgres
+
+## AI Integration
+The app includes an LLM that:
+- Suggests task assignments based on family patterns
+- Reminds about upcoming events and deadlines
+- Optimizes schedules and logistics
+- Learns family preferences over time
+
+## Code Style
+- Follow RESTful API design patterns
+- Use meaningful variable and function names
+- Include JSDoc comments for complex functions
+- Prioritize code readability and maintainability

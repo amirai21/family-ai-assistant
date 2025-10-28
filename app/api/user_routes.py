@@ -25,14 +25,25 @@ async def get_user(user_id: int, db: AsyncSession = Depends(get_db)) -> User:
         )
     return user
 
+@router.get("/phone/{phone_e164}", response_model=User)
+async def get_user_by_phone(phone_e164: str, db: AsyncSession = Depends(get_db)) -> User:
+    """Get a user by phone number (E.164 format, e.g., +972512345678)"""
+    user = await user_service.get_user_by_phone(db, phone_e164)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with phone {phone_e164} not found"
+        )
+    return user
+
 @router.post("", response_model=User, status_code=status.HTTP_201_CREATED)
 async def create_user(user_data: UserCreate, db: AsyncSession = Depends(get_db)) -> User:
     """Create a new user"""
-    existing_user = await user_service.get_user_by_email(db, user_data.email)
+    existing_user = await user_service.get_user_by_phone(db, user_data.phone_e164)
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"User with email {user_data.email} already exists"
+            detail=f"User with phone {user_data.phone_e164} already exists"
         )
     
     user = await user_service.create_user(db, user_data)
@@ -45,6 +56,15 @@ async def update_user(
     db: AsyncSession = Depends(get_db)
 ) -> User:
     """Update an existing user"""
+    # Check if phone is being changed to an existing phone
+    if user_data.phone_e164:
+        existing_user = await user_service.get_user_by_phone(db, user_data.phone_e164)
+        if existing_user and existing_user.id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"User with phone {user_data.phone_e164} already exists"
+            )
+    
     user = await user_service.update_user(db, user_id, user_data)
     if not user:
         raise HTTPException(
@@ -62,3 +82,36 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)) -> None:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User with id {user_id} not found"
         )
+
+@router.post("/{user_id}/verify-whatsapp", response_model=User)
+async def verify_whatsapp(user_id: int, db: AsyncSession = Depends(get_db)) -> User:
+    """Mark user's WhatsApp as verified"""
+    user = await user_service.verify_whatsapp(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with id {user_id} not found"
+        )
+    return user
+
+@router.post("/{user_id}/opt-in", response_model=User)
+async def opt_in_whatsapp(user_id: int, db: AsyncSession = Depends(get_db)) -> User:
+    """Opt-in user to WhatsApp notifications"""
+    user = await user_service.toggle_whatsapp_opt_in(db, user_id, True)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with id {user_id} not found"
+        )
+    return user
+
+@router.post("/{user_id}/opt-out", response_model=User)
+async def opt_out_whatsapp(user_id: int, db: AsyncSession = Depends(get_db)) -> User:
+    """Opt-out user from WhatsApp notifications"""
+    user = await user_service.toggle_whatsapp_opt_in(db, user_id, False)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with id {user_id} not found"
+        )
+    return user
