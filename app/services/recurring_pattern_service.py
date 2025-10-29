@@ -91,16 +91,33 @@ async def create_recurring_pattern(
 async def update_recurring_pattern(
     db: AsyncSession,
     pattern_id: int,
-    pattern_data: RecurringPatternUpdate
+    pattern_data: RecurringPatternUpdate,
+    update_future_tasks: bool = False
 ) -> Optional[RecurringPatternModel]:
-    """Update an existing recurring pattern"""
+    """
+    Update an existing recurring pattern.
+    
+    Args:
+        db: Database session
+        pattern_id: ID of pattern to update
+        pattern_data: New pattern data
+        update_future_tasks: If True, updates all future incomplete tasks with new pattern values
+    
+    Returns:
+        Updated pattern or None if not found
+    """
     pattern = await get_recurring_pattern_by_id(db, pattern_id)
     if not pattern:
         return None
     
+    # Track what changed for updating tasks
+    changes = {}
+    
     if pattern_data.title is not None:
+        changes['title'] = pattern_data.title
         pattern.title = pattern_data.title
     if pattern_data.description is not None:
+        changes['description'] = pattern_data.description
         pattern.description = pattern_data.description
     if pattern_data.frequency is not None:
         pattern.frequency = pattern_data.frequency
@@ -109,26 +126,103 @@ async def update_recurring_pattern(
     if pattern_data.by_day is not None:
         pattern.by_day = pattern_data.by_day
     if pattern_data.start_time_hour is not None:
+        changes['start_time_hour'] = pattern_data.start_time_hour
         pattern.start_time_hour = pattern_data.start_time_hour
     if pattern_data.start_time_minute is not None:
+        changes['start_time_minute'] = pattern_data.start_time_minute
         pattern.start_time_minute = pattern_data.start_time_minute
     if pattern_data.duration_minutes is not None:
+        changes['duration_minutes'] = pattern_data.duration_minutes
         pattern.duration_minutes = pattern_data.duration_minutes
     if pattern_data.start_date is not None:
         pattern.start_date = pattern_data.start_date.replace(tzinfo=None)
     if pattern_data.end_date is not None:
         pattern.end_date = pattern_data.end_date.replace(tzinfo=None) if pattern_data.end_date else None
     if pattern_data.default_assignee_user_id is not None:
+        changes['assignee_user_id'] = pattern_data.default_assignee_user_id
         pattern.default_assignee_user_id = pattern_data.default_assignee_user_id
     if pattern_data.is_active is not None:
         pattern.is_active = pattern_data.is_active
     if pattern_data.meta is not None:
+        changes['meta'] = pattern_data.meta
         pattern.meta = pattern_data.meta
     
     await db.flush()
+    
+    # Update future tasks if requested
+    if update_future_tasks and changes:
+        await _update_future_task_instances(db, pattern, changes)
+    
     await db.refresh(pattern)
     await db.refresh(pattern, ["default_assignee", "created_by"])
     return pattern
+
+
+async def _update_future_task_instances(
+    db: AsyncSession,
+    pattern: RecurringPatternModel,
+    changes: dict
+) -> int:
+    """
+    Update all future incomplete task instances with new pattern values.
+    
+    Args:
+        db: Database session
+        pattern: The updated recurring pattern
+        changes: Dictionary of fields that changed
+    
+    Returns:
+        Number of tasks updated
+    """
+    # Get all future incomplete tasks for this pattern
+    result = await db.execute(
+        select(TaskModel).where(
+            and_(
+                TaskModel.recurring_pattern_id == pattern.id,
+                TaskModel.status.in_([TaskStatus.todo, TaskStatus.in_progress]),
+                TaskModel.occurrence_date >= date.today()
+            )
+        )
+    )
+    tasks = list(result.scalars().all())
+    
+    updated_count = 0
+    for task in tasks:
+        # Update title and description
+        if 'title' in changes:
+            task.title = changes['title']
+        if 'description' in changes:
+            task.description = changes['description']
+        
+        # Update due time if time changed
+        if ('start_time_hour' in changes or 'start_time_minute' in changes) and task.occurrence_date:
+            new_hour = changes.get('start_time_hour', pattern.start_time_hour)
+            new_minute = changes.get('start_time_minute', pattern.start_time_minute) or 0
+            if new_hour is not None:
+                task.due_at = datetime.combine(
+                    task.occurrence_date,
+                    datetime.min.time().replace(hour=new_hour, minute=new_minute)
+                )
+        
+        # Update assignee
+        if 'assignee_user_id' in changes:
+            task.assignee_user_id = changes['assignee_user_id']
+        
+        # Update meta (merge with existing, update duration)
+        if 'duration_minutes' in changes or 'meta' in changes:
+            task_meta = task.meta.copy() if task.meta else {}
+            if 'duration_minutes' in changes:
+                task_meta['duration_minutes'] = changes['duration_minutes']
+            if 'meta' in changes:
+                # Merge pattern meta changes into task meta
+                for key, value in changes['meta'].items():
+                    task_meta[key] = value
+            task.meta = task_meta
+        
+        updated_count += 1
+    
+    await db.flush()
+    return updated_count
 
 
 async def delete_recurring_pattern(

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.family import Family as FamilyModel
+from app.models.family_member import FamilyMember as FamilyMemberModel
 from app.api.schemas import FamilyCreate, FamilyUpdate
 
 async def get_families(db: AsyncSession) -> List[FamilyModel]:
@@ -21,7 +22,7 @@ async def get_family_with_members(db: AsyncSession, family_id: int) -> Optional[
     result = await db.execute(
         select(FamilyModel)
         .where(FamilyModel.id == family_id)
-        .options(selectinload(FamilyModel.memberships).selectinload("user"))
+        .options(selectinload(FamilyModel.memberships).selectinload(FamilyMemberModel.user))
     )
     return result.scalar_one_or_none()
 

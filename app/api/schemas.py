@@ -102,7 +102,9 @@ class FamilyMemberWithUser(BaseModel):
     updated_at: datetime
 
 class FamilyWithMembers(Family):
-    members: list[FamilyMemberWithUser] = []
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    
+    members: list[FamilyMemberWithUser] = Field(default=[], validation_alias='memberships', serialization_alias='members')
 
 
 # ============================================================================

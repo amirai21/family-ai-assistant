@@ -96,9 +96,19 @@ async def create_recurring_pattern(
 async def update_recurring_pattern(
     pattern_id: int,
     pattern_data: RecurringPatternUpdate,
+    update_future_tasks: bool = Query(
+        False, 
+        description="If true, updates all future incomplete tasks with the new pattern values (title, time, assignee, etc.)"
+    ),
     db: AsyncSession = Depends(get_db)
 ) -> RecurringPatternWithDetails:
-    """Update an existing recurring pattern"""
+    """
+    Update an existing recurring pattern.
+    
+    By default, only the pattern is updated and future-generated tasks will use the new values.
+    If update_future_tasks=true, all existing future incomplete tasks will also be updated with the new values.
+    This is useful when you change the time, assignee, or title and want existing tasks to reflect the change.
+    """
     # Verify default assignee exists if being changed
     if pattern_data.default_assignee_user_id:
         assignee = await user_service.get_user_by_id(db, pattern_data.default_assignee_user_id)
@@ -108,7 +118,12 @@ async def update_recurring_pattern(
                 detail=f"User with id {pattern_data.default_assignee_user_id} not found"
             )
     
-    pattern = await recurring_pattern_service.update_recurring_pattern(db, pattern_id, pattern_data)
+    pattern = await recurring_pattern_service.update_recurring_pattern(
+        db, 
+        pattern_id, 
+        pattern_data,
+        update_future_tasks=update_future_tasks
+    )
     if not pattern:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
