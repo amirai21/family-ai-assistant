@@ -13,6 +13,7 @@ from app.api import family_member_routes
 from app.api import task_routes
 from app.api import reminder_routes
 from app.api import recurring_pattern_routes
+from app.api import telegram_routes
 
 
 @asynccontextmanager
@@ -50,6 +51,11 @@ app.include_router(family_member_routes.router, prefix="/api")
 app.include_router(task_routes.router, prefix="/api")
 app.include_router(reminder_routes.router, prefix="/api")
 app.include_router(recurring_pattern_routes.router, prefix="/api")
+
+# Telegram router is mounted at root (no /api prefix) — the family-os
+# frontend hardcodes the URL as ${ASSISTANT_URL}/telegram/generate-code,
+# and Telegram itself just POSTs to whatever webhook we register.
+app.include_router(telegram_routes.router)
 
 
 @app.get("/", tags=["meta"])
