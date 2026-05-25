@@ -97,19 +97,23 @@ def _format_event_reply(intent: FamilyEventIntent) -> str:
     return base
 
 
+_CATEGORY_EMOJI = {"grocery": "🛒", "home": "🏠", "health": "💊"}
+_CATEGORY_HE = {"grocery": "מכולת", "home": "לבית", "health": "פארם"}
+
+
 def _format_grocery_reply(intent: GroceryIntent) -> str:
     if len(intent.items) == 1:
         it = intent.items[0]
-        if it.qty:
-            return f"🛒 נוסף לרשימת קניות: {it.title} ({it.qty})"
-        return f"🛒 נוסף לרשימת קניות: {it.title}"
-    # Multiple items — render a small bulleted list.
-    lines = ["🛒 נוסף לרשימת קניות:"]
+        emoji = _CATEGORY_EMOJI.get(it.shopping_category, "🛒")
+        shelf = _CATEGORY_HE.get(it.shopping_category, "מכולת")
+        qty = f" ({it.qty})" if it.qty else ""
+        return f"{emoji} נוסף ל{shelf}: {it.title}{qty}"
+    # Multiple items — render a bulleted list with per-item category emoji.
+    lines = ["✅ נוסף לרשימת קניות:"]
     for it in intent.items:
-        if it.qty:
-            lines.append(f"• {it.title} ({it.qty})")
-        else:
-            lines.append(f"• {it.title}")
+        emoji = _CATEGORY_EMOJI.get(it.shopping_category, "🛒")
+        qty = f" ({it.qty})" if it.qty else ""
+        lines.append(f"{emoji} {it.title}{qty}")
     return "\n".join(lines)
 
 
@@ -154,6 +158,7 @@ async def _handle_text_message(
                     family_id,
                     title=it.title,
                     qty=it.qty,
+                    shopping_category=it.shopping_category,
                 )
             return _format_grocery_reply(parsed)
     except httpx.HTTPStatusError as exc:

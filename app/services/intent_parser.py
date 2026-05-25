@@ -40,6 +40,11 @@ class FamilyEventIntent(BaseModel):
 class GroceryItem(BaseModel):
     title: str
     qty: str | None = None
+    # family-os has three shopping-list "shelves": grocery (food),
+    # home (cleaning/laundry/paper), health (pharmacy/hygiene). Defaults
+    # to grocery — the most common case — but the LLM should override
+    # based on Hebrew keywords (see system prompt).
+    shopping_category: Literal["grocery", "home", "health"] = "grocery"
 
 
 class GroceryIntent(BaseModel):
@@ -94,6 +99,22 @@ Intents:
                 qty   — optional, the quantity as text (e.g. "2", "ליטר",
                          "חבילה", "תריסר"), if the user gave one for
                          THAT specific item.
+                shopping_category — ONE of "grocery", "home", "health".
+                         Choose PER ITEM based on what it is:
+                          - "grocery"  food, drinks, snacks. Examples:
+                            חלב, לחם, ביצים, בננות, גבינה, יוגורט,
+                            קוטג׳, חומוס, קוקה קולה, שוקולד, אורז, פסטה.
+                          - "home"     household, cleaning, laundry, paper,
+                            light/electric. Examples: סבון כלים, נייר טואלט,
+                            סקוטש, מטליות, אקונומיקה, אבקת כביסה, מרכך,
+                            שקיות זבל, נורה, סוללות.
+                          - "health"   pharmacy, hygiene, medicine. Examples:
+                            תרופות, ויטמינים, שמפו, מרכך שיער, משחת שיניים,
+                            דאודורנט, פלסטרים, מסיכות, סבון רחצה.
+                         When in doubt, pick "grocery". If the user
+                         explicitly says "לרשימת ניקיון"/"לחומרי ניקוי"/
+                         "לפארם"/"לרוקחות" — use that category for ALL
+                         items in the message.
 
 3. "unsupported" — the request is something else (chores, projects, notes,
    general chat). Reply with a short Hebrew `reason` the bot will show the
