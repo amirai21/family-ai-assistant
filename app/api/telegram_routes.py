@@ -33,8 +33,13 @@ from app.core.database import get_db
 from app.services import telegram_service
 from app.services.family_os_client import family_os_client
 from app.services.intent_parser import (
+    ChoreIntent,
     FamilyEventIntent,
     GroceryIntent,
+    NoteIntent,
+    QueryChoresIntent,
+    QueryEventsIntent,
+    QueryGroceryIntent,
     UnsupportedIntent,
     parse_intent,
 )
@@ -101,6 +106,79 @@ _CATEGORY_EMOJI = {"grocery": "🛒", "home": "🏠", "health": "💊"}
 _CATEGORY_HE = {"grocery": "מכולת", "home": "לבית", "health": "פארם"}
 
 
+def _format_chore_reply(intent: ChoreIntent) -> str:
+    base = f"✅ נוסף למשימות: {intent.title}"
+    if intent.assigned_to:
+        base += f"\n👤 {intent.assigned_to}"
+    return base
+
+
+def _format_note_reply(intent: NoteIntent) -> str:
+    if intent.title:
+        return f"📝 נשמרה תזכורת: {intent.title}\n{intent.body}"
+    # Truncate long bodies in the reply so the chat doesn't get spammed —
+    # the full body is saved server-side regardless.
+    preview = intent.body if len(intent.body) <= 80 else intent.body[:77] + "..."
+    return f"📝 נשמרה תזכורת: {preview}"
+
+
+_RANGE_HE = {"today": "להיום", "tomorrow": "למחר", "week": "לשבוע הקרוב"}
+
+
+def _hhmm(m: int) -> str:
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def _format_events_query_reply(
+    range_: str, events: list[dict[str, Any]]
+) -> str:
+    label = _RANGE_HE.get(range_, "להיום")
+    if not events:
+        return f"📅 אין אירועים {label}."
+    lines = [f"📅 אירועים {label}:"]
+    for e in events:
+        title = e.get("title", "(ללא כותרת)")
+        start = e.get("startMinutes")
+        end = e.get("endMinutes")
+        # Recurring events have date=null; one-time have a "YYYY-MM-DD" date.
+        # For week view, prefix one-time events with the date to disambiguate.
+        prefix = ""
+        if range_ == "week" and e.get("date"):
+            prefix = f"{e['date']} · "
+        time_str = ""
+        if isinstance(start, int) and isinstance(end, int):
+            time_str = f" ({_hhmm(start)}-{_hhmm(end)})"
+        location = e.get("location")
+        loc_str = f" 📍{location}" if location else ""
+        lines.append(f"• {prefix}{title}{time_str}{loc_str}")
+    return "\n".join(lines)
+
+
+def _format_grocery_query_reply(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "🛒 רשימת הקניות ריקה."
+    lines = ["🛒 ברשימת הקניות:"]
+    for it in items:
+        emoji = _CATEGORY_EMOJI.get(it.get("shoppingCategory") or "grocery", "🛒")
+        title = it.get("title", "(ללא שם)")
+        qty = it.get("qty")
+        qty_str = f" ({qty})" if qty else ""
+        lines.append(f"{emoji} {title}{qty_str}")
+    return "\n".join(lines)
+
+
+def _format_chores_query_reply(chores: list[dict[str, Any]]) -> str:
+    if not chores:
+        return "✅ אין משימות פתוחות."
+    lines = ["📋 משימות פתוחות:"]
+    for c in chores:
+        title = c.get("title", "(ללא כותרת)")
+        assignee = c.get("assignedTo")
+        suffix = f" — {assignee}" if assignee else ""
+        lines.append(f"• {title}{suffix}")
+    return "\n".join(lines)
+
+
 def _format_grocery_reply(intent: GroceryIntent) -> str:
     if len(intent.items) == 1:
         it = intent.items[0]
@@ -161,6 +239,36 @@ async def _handle_text_message(
                     shopping_category=it.shopping_category,
                 )
             return _format_grocery_reply(parsed)
+
+        if isinstance(parsed, ChoreIntent):
+            await family_os_client.create_chore(
+                family_id,
+                title=parsed.title,
+                assigned_to=parsed.assigned_to,
+            )
+            return _format_chore_reply(parsed)
+
+        if isinstance(parsed, NoteIntent):
+            await family_os_client.create_note(
+                family_id,
+                body=parsed.body,
+                title=parsed.title,
+            )
+            return _format_note_reply(parsed)
+
+        if isinstance(parsed, QueryEventsIntent):
+            events = await family_os_client.list_family_events(
+                family_id, range_=parsed.range
+            )
+            return _format_events_query_reply(parsed.range, events)
+
+        if isinstance(parsed, QueryGroceryIntent):
+            items = await family_os_client.list_grocery(family_id)
+            return _format_grocery_query_reply(items)
+
+        if isinstance(parsed, QueryChoresIntent):
+            chores = await family_os_client.list_chores(family_id)
+            return _format_chores_query_reply(chores)
     except httpx.HTTPStatusError as exc:
         log.warning("family-os API %s: %s", exc.response.status_code, exc.response.text[:200])
         return (
@@ -233,7 +341,10 @@ async def telegram_webhook(
                 chat_id,
                 "✅ חיברתי! עכשיו אפשר לשלוח לי בקשות בעברית, למשל:\n"
                 "• \"תקבע מסיבת תה ב-15 לאפריל ב-14:00\"\n"
-                "• \"תוסיף חלב לקניות\"",
+                "• \"תוסיף חלב וביצים לקניות\"\n"
+                "• \"תזכיר לעודד להוציא את הזבל\"\n"
+                "• \"תרשום פתק שהמפתחות אצל השכן\"\n"
+                "• \"מה יש לי היום?\" / \"מה ברשימת הקניות?\"",
             )
         return {"ok": True}
 
@@ -243,7 +354,10 @@ async def telegram_webhook(
             "אני העוזר של משפחת Family OS 🏠\n"
             "אפשר לבקש ממני:\n"
             "• לתזמן אירוע: \"תקבע פגישה ביום ראשון ב-10\"\n"
-            "• להוסיף לקניות: \"תוסיף לחם וחלב לרשימה\"",
+            "• להוסיף לקניות: \"תוסיף לחם וחלב לרשימה\"\n"
+            "• להוסיף משימה: \"תזכיר לעודד להוציא את הזבל\"\n"
+            "• לרשום פתק: \"תרשום שהמפתחות אצל השכן\"\n"
+            "• לשאול: \"מה יש לי היום?\" / \"מה ברשימת הקניות?\" / \"מה המשימות?\"",
         )
         return {"ok": True}
 

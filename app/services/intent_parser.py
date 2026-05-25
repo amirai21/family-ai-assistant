@@ -55,13 +55,54 @@ class GroceryIntent(BaseModel):
     items: list[GroceryItem] = Field(..., min_length=1)
 
 
+class ChoreIntent(BaseModel):
+    intent: Literal["chore"] = "chore"
+    title: str
+    # Free-text Hebrew name of the assignee, if mentioned. family-os tries
+    # to resolve it to a known familyMember; on no match it's stored as
+    # free text.
+    assigned_to: str | None = None
+
+
+class NoteIntent(BaseModel):
+    intent: Literal["note"] = "note"
+    # Required body — the main text of the note. Pinning is always false
+    # at creation time; the user pins manually in the app.
+    body: str
+    # Optional short title — if the user explicitly named one ("פתק עם
+    # הכותרת X"). Most casual notes won't have one.
+    title: str | None = None
+
+
+class QueryEventsIntent(BaseModel):
+    intent: Literal["query_events"] = "query_events"
+    range: Literal["today", "tomorrow", "week"] = "today"
+
+
+class QueryGroceryIntent(BaseModel):
+    intent: Literal["query_grocery"] = "query_grocery"
+
+
+class QueryChoresIntent(BaseModel):
+    intent: Literal["query_chores"] = "query_chores"
+
+
 class UnsupportedIntent(BaseModel):
     intent: Literal["unsupported"] = "unsupported"
     reason: str
 
 
 # Discriminated union — Pydantic picks the right one based on the `intent` field.
-ParsedIntent = FamilyEventIntent | GroceryIntent | UnsupportedIntent
+ParsedIntent = (
+    FamilyEventIntent
+    | GroceryIntent
+    | ChoreIntent
+    | NoteIntent
+    | QueryEventsIntent
+    | QueryGroceryIntent
+    | QueryChoresIntent
+    | UnsupportedIntent
+)
 
 
 SYSTEM_PROMPT = """\
@@ -116,9 +157,62 @@ Intents:
                          "לפארם"/"לרוקחות" — use that category for ALL
                          items in the message.
 
-3. "unsupported" — the request is something else (chores, projects, notes,
-   general chat). Reply with a short Hebrew `reason` the bot will show the
-   user, e.g. "אני יודע כרגע רק לתזמן אירועים ולהוסיף קניות".
+3. "chore" — the user wants to add a household to-do / chore (something
+   one person needs to DO, with no specific time). Distinguish from
+   "family_event" by the absence of a clock time and the imperative,
+   action-on-a-person feel ("תזכיר ל…", "X צריך…", "תוסיף משימה…").
+   Fields:
+     title        — short Hebrew action phrase (4–60 chars), starting with
+                    a verb when natural ("להוציא את הזבל", "לעבור על
+                    חשבונות", "לקנות מתנה ליום הולדת").
+     assigned_to  — optional Hebrew name of who should do it, if the user
+                    named one ("עודד", "אמא", "הילדים"). Leave null if
+                    unspecified or generic ("מישהו"/"כולם").
+   Examples:
+     "תזכיר לעודד להוציא את הזבל" → {title:"להוציא את הזבל", assigned_to:"עודד"}
+     "אני צריך לעבור על החשבונות"  → {title:"לעבור על החשבונות"}
+     "תוסיף משימה לקנות מתנה לסבתא" → {title:"לקנות מתנה לסבתא"}
+
+4. "note" — the user wants to save a free-form note / reminder / piece of
+   info for the family. Distinguish from "chore" by the absence of an
+   action verb directed at a person — notes are pieces of INFORMATION to
+   remember, not things TO DO. Triggers: "תרשום פתק…", "תוסיף לפתקים…",
+   "תזכור ש…", "תעלה לי במחברת…", "שמור לי ש…".
+   Fields:
+     body  — the main text of the note. Use what the user actually wants
+             to remember, not the framing ("תרשום ש-X" → body="X").
+     title — optional short title, ONLY if the user explicitly named one
+             ("פתק עם הכותרת X", "תוסיף פתק שכותרתו…"). Otherwise null.
+   Examples:
+     "תרשום פתק שהמפתחות אצל השכן" → {body:"המפתחות אצל השכן"}
+     "תזכור שיש לנו את הוואי-פיי חדש: SSID FamilyOS, סיסמה 12345"
+                                  → {body:"וואי-פיי חדש: SSID FamilyOS, סיסמה 12345"}
+     "תעלה לי במחברת את מספר השרברב 050-1234567"
+                                  → {body:"מספר השרברב 050-1234567"}
+
+5. "query_events" — the user is ASKING what's scheduled (not creating
+   anything). Triggers: "מה יש לי היום", "מה יש מחר", "מה התוכניות לשבוע",
+   "אילו אירועים יש השבוע", "מה יש בלוח".
+   Fields:
+     range — ONE of "today" / "tomorrow" / "week".
+             Default: "today" if the user said "היום" or didn't specify a
+             timeframe; "tomorrow" for "מחר"; "week" for "השבוע" / "בימים
+             הקרובים".
+
+6. "query_grocery" — the user is ASKING what's on the shopping list.
+   Triggers: "מה ברשימת הקניות", "מה צריך לקנות", "מה יש בקניות",
+   "מה חסר במכולת".
+   No fields beyond the intent name.
+
+7. "query_chores" — the user is ASKING what tasks are open.
+   Triggers: "מה המשימות הפתוחות", "מה יש לי לעשות", "אילו מטלות יש",
+   "מה צריך לעשות בבית".
+   No fields beyond the intent name.
+
+8. "unsupported" — the request is something else (projects, kids' schedules,
+   general chat, deleting/updating existing items). Reply with a short
+   Hebrew `reason`, e.g.
+   "אני יודע להוסיף ולשאול לגבי אירועים, קניות, משימות ופתקים — שאר הדברים עוד לא".
 
 Rules:
 - ALWAYS return valid JSON matching ONE of the schemas above.
@@ -185,6 +279,16 @@ async def parse_intent(text: str) -> ParsedIntent:
             return FamilyEventIntent.model_validate(raw)
         if intent == "grocery":
             return GroceryIntent.model_validate(raw)
+        if intent == "chore":
+            return ChoreIntent.model_validate(raw)
+        if intent == "note":
+            return NoteIntent.model_validate(raw)
+        if intent == "query_events":
+            return QueryEventsIntent.model_validate(raw)
+        if intent == "query_grocery":
+            return QueryGroceryIntent.model_validate(raw)
+        if intent == "query_chores":
+            return QueryChoresIntent.model_validate(raw)
         if intent == "unsupported":
             return UnsupportedIntent.model_validate(raw)
     except Exception as exc:  # noqa: BLE001

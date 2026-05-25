@@ -73,6 +73,46 @@ class FamilyOsClient:
             r.raise_for_status()
             return r.json()
 
+    async def create_note(
+        self,
+        family_id: str,
+        *,
+        body: str,
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        """Add a note. Always created unpinned; user pins manually in the app."""
+        payload: dict[str, Any] = {"body": body}
+        if title is not None:
+            payload["title"] = title
+
+        url = f"{self._base}/v1/internal/family/{family_id}/notes"
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(url, headers=self._headers(), json=payload)
+            r.raise_for_status()
+            return r.json()
+
+    async def create_chore(
+        self,
+        family_id: str,
+        *,
+        title: str,
+        assigned_to: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Add a chore. `assigned_to` is free-text Hebrew (e.g. "עודד"); the
+        server tries to resolve it to a known familyMember.displayName and
+        link `assignedToMemberId`, falling back to free-text on no match.
+        """
+        body: dict[str, Any] = {"title": title}
+        if assigned_to is not None:
+            body["assignedTo"] = assigned_to
+
+        url = f"{self._base}/v1/internal/family/{family_id}/chores"
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(url, headers=self._headers(), json=body)
+            r.raise_for_status()
+            return r.json()
+
     async def create_grocery_item(
         self,
         family_id: str,
@@ -95,6 +135,54 @@ class FamilyOsClient:
         url = f"{self._base}/v1/internal/family/{family_id}/grocery"
         async with httpx.AsyncClient(timeout=15.0) as c:
             r = await c.post(url, headers=self._headers(), json=body)
+            r.raise_for_status()
+            return r.json()
+
+
+    # ── reads ─────────────────────────────────────────────────────────────
+
+    async def list_family_events(
+        self,
+        family_id: str,
+        *,
+        range_: str = "today",
+    ) -> list[dict[str, Any]]:
+        """`range_` is one of: 'today' / 'tomorrow' / 'week'."""
+        url = f"{self._base}/v1/internal/family/{family_id}/family-events"
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.get(
+                url, headers=self._headers(), params={"range": range_}
+            )
+            r.raise_for_status()
+            return r.json()
+
+    async def list_grocery(
+        self,
+        family_id: str,
+        *,
+        status: str = "unchecked",
+    ) -> list[dict[str, Any]]:
+        """`status` is one of: 'unchecked' (default) / 'all'."""
+        url = f"{self._base}/v1/internal/family/{family_id}/grocery"
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.get(
+                url, headers=self._headers(), params={"status": status}
+            )
+            r.raise_for_status()
+            return r.json()
+
+    async def list_chores(
+        self,
+        family_id: str,
+        *,
+        status: str = "undone",
+    ) -> list[dict[str, Any]]:
+        """`status` is one of: 'undone' (default) / 'all'."""
+        url = f"{self._base}/v1/internal/family/{family_id}/chores"
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.get(
+                url, headers=self._headers(), params={"status": status}
+            )
             r.raise_for_status()
             return r.json()
 
