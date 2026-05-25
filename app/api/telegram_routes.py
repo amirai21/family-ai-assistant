@@ -98,9 +98,19 @@ def _format_event_reply(intent: FamilyEventIntent) -> str:
 
 
 def _format_grocery_reply(intent: GroceryIntent) -> str:
-    if intent.qty:
-        return f"🛒 נוסף לרשימת קניות: {intent.title} ({intent.qty})"
-    return f"🛒 נוסף לרשימת קניות: {intent.title}"
+    if len(intent.items) == 1:
+        it = intent.items[0]
+        if it.qty:
+            return f"🛒 נוסף לרשימת קניות: {it.title} ({it.qty})"
+        return f"🛒 נוסף לרשימת קניות: {it.title}"
+    # Multiple items — render a small bulleted list.
+    lines = ["🛒 נוסף לרשימת קניות:"]
+    for it in intent.items:
+        if it.qty:
+            lines.append(f"• {it.title} ({it.qty})")
+        else:
+            lines.append(f"• {it.title}")
+    return "\n".join(lines)
 
 
 async def _handle_text_message(
@@ -136,11 +146,15 @@ async def _handle_text_message(
             return _format_event_reply(parsed)
 
         if isinstance(parsed, GroceryIntent):
-            await family_os_client.create_grocery_item(
-                family_id,
-                title=parsed.title,
-                qty=parsed.qty,
-            )
+            # Create one row per item. We don't bail on a partial failure —
+            # the items that succeeded are kept; failures fall through to
+            # the outer except block with a generic error message.
+            for it in parsed.items:
+                await family_os_client.create_grocery_item(
+                    family_id,
+                    title=it.title,
+                    qty=it.qty,
+                )
             return _format_grocery_reply(parsed)
     except httpx.HTTPStatusError as exc:
         log.warning("family-os API %s: %s", exc.response.status_code, exc.response.text[:200])

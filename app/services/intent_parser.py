@@ -37,10 +37,17 @@ class FamilyEventIntent(BaseModel):
     location: str | None = None
 
 
-class GroceryIntent(BaseModel):
-    intent: Literal["grocery"] = "grocery"
+class GroceryItem(BaseModel):
     title: str
     qty: str | None = None
+
+
+class GroceryIntent(BaseModel):
+    intent: Literal["grocery"] = "grocery"
+    # Always a list, even for a single item — the user can ask for many at
+    # once ("תוסיף עגבניות וביצים"). The webhook handler creates one row
+    # per item.
+    items: list[GroceryItem] = Field(..., min_length=1)
 
 
 class UnsupportedIntent(BaseModel):
@@ -77,10 +84,16 @@ Intents:
      end_minutes    — minutes since midnight (1–1440). Must be > start_minutes.
      location       — optional, only if explicitly stated.
 
-2. "grocery" — the user wants to add an item to the shopping list.
-   Fields:
-     title — short Hebrew name of the item.
-     qty   — optional, the quantity as text (e.g. "2", "ליטר", "חבילה").
+2. "grocery" — the user wants to add one or more items to the shopping list.
+   Field:
+     items — list of objects, one per item the user mentioned. EXTRACT
+             EVERY ITEM, not just the first. For "תוסיף עגבניות וביצים"
+             return [{"title":"עגבניות"},{"title":"ביצים"}].
+             Per-item fields:
+                title — short Hebrew name of the item.
+                qty   — optional, the quantity as text (e.g. "2", "ליטר",
+                         "חבילה", "תריסר"), if the user gave one for
+                         THAT specific item.
 
 3. "unsupported" — the request is something else (chores, projects, notes,
    general chat). Reply with a short Hebrew `reason` the bot will show the
