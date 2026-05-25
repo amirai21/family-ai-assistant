@@ -50,10 +50,14 @@ jobs:
         run: |
           SHORT_SHA="${GITHUB_SHA::7}"
           IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/${{ env.IMAGE_NAME }}:${SHORT_SHA}"
+          # `--update-env-vars` adds/updates without wiping others.
+          # `--set-env-vars` would REPLACE everything except secret-backed
+          # vars, which silently nuked FAMILY_OS_SERVICE_TOKEN +
+          # FAMILY_OS_API_URL on the previous deploy (see fix in this commit).
+          # Anything secret (DB URL etc.) should live in Secret Manager.
           gcloud run deploy "${{ env.SERVICE_NAME }}" \
             --image "${IMAGE_URI}" \
             --region "${{ env.REGION }}" \
             --platform managed \
             --allow-unauthenticated \
-            --allow-unauthenticated \
-            --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }}"
+            --update-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }}"
