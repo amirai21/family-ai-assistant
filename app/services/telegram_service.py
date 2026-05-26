@@ -99,6 +99,44 @@ async def get_family_for_chat(db: AsyncSession, chat_id: int) -> str | None:
     return row.scalar_one_or_none()
 
 
+async def get_binding_for_chat(
+    db: AsyncSession, chat_id: int
+) -> tuple[str | None, str | None]:
+    """
+    Returns (family_id, family_member_id). Either side can be None:
+      - both None: chat has never been bound
+      - family_id set, family_member_id None: bound via /start but /me not yet set
+      - both set: fully identified
+    """
+    row = await db.execute(
+        select(TelegramChat.family_id, TelegramChat.family_member_id).where(
+            TelegramChat.chat_id == chat_id
+        )
+    )
+    res = row.first()
+    if res is None:
+        return None, None
+    return res[0], res[1]
+
+
+async def set_member_for_chat(
+    db: AsyncSession, chat_id: int, member_id: str
+) -> bool:
+    """
+    Set or overwrite the family_member_id binding for a chat. Returns True
+    if a row was updated, False if no chat is bound yet (caller must redeem
+    a code first).
+    """
+    from sqlalchemy import update
+
+    result = await db.execute(
+        update(TelegramChat)
+        .where(TelegramChat.chat_id == chat_id)
+        .values(family_member_id=member_id)
+    )
+    return (result.rowcount or 0) > 0
+
+
 async def prune_expired_codes(db: AsyncSession) -> int:
     """Best-effort cleanup. Called occasionally to keep the table tidy."""
     now = datetime.now(timezone.utc)

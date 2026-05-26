@@ -146,13 +146,40 @@ class FamilyOsClient:
         family_id: str,
         *,
         range_: str = "today",
+        kid_name: str | None = None,
     ) -> list[dict[str, Any]]:
-        """`range_` is one of: 'today' / 'tomorrow' / 'week'."""
+        """
+        `range_`: 'today' / 'tomorrow' / 'week'.
+        `kid_name`: optional Hebrew name; server filters to events assigned
+                    to this kid (assigneeType='kid' + matching assigneeId).
+        """
         url = f"{self._base}/v1/internal/family/{family_id}/family-events"
+        params: dict[str, str] = {"range": range_}
+        if kid_name is not None:
+            params["kidName"] = kid_name
         async with httpx.AsyncClient(timeout=15.0) as c:
-            r = await c.get(
-                url, headers=self._headers(), params={"range": range_}
-            )
+            r = await c.get(url, headers=self._headers(), params=params)
+            r.raise_for_status()
+            return r.json()
+
+    async def list_schedule_blocks(
+        self,
+        family_id: str,
+        *,
+        range_: str = "today",
+        kid_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Kid's weekly schedule (school / hobby / other). Same range semantics
+        as family-events. kid_name is optional; without it the server returns
+        all blocks in range for the family (not useful for the bot — pass it).
+        """
+        url = f"{self._base}/v1/internal/family/{family_id}/schedule-blocks"
+        params: dict[str, str] = {"range": range_}
+        if kid_name is not None:
+            params["kidName"] = kid_name
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.get(url, headers=self._headers(), params=params)
             r.raise_for_status()
             return r.json()
 
@@ -176,13 +203,30 @@ class FamilyOsClient:
         family_id: str,
         *,
         status: str = "undone",
+        assignee_member_id: str | None = None,
+        selected_for_today: bool | None = None,
     ) -> list[dict[str, Any]]:
-        """`status` is one of: 'undone' (default) / 'all'."""
+        """
+        `status`: 'undone' (default) / 'all'.
+        `assignee_member_id`: filter to chores assigned to this familyMember.
+        `selected_for_today`: filter on the selectedForToday flag.
+        """
         url = f"{self._base}/v1/internal/family/{family_id}/chores"
+        params: dict[str, str] = {"status": status}
+        if assignee_member_id is not None:
+            params["assigneeMemberId"] = assignee_member_id
+        if selected_for_today is not None:
+            params["selectedForToday"] = "true" if selected_for_today else "false"
         async with httpx.AsyncClient(timeout=15.0) as c:
-            r = await c.get(
-                url, headers=self._headers(), params={"status": status}
-            )
+            r = await c.get(url, headers=self._headers(), params=params)
+            r.raise_for_status()
+            return r.json()
+
+    async def list_members(self, family_id: str) -> list[dict[str, Any]]:
+        """List active family members (id, displayName, role, avatarEmoji)."""
+        url = f"{self._base}/v1/internal/family/{family_id}/members"
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.get(url, headers=self._headers())
             r.raise_for_status()
             return r.json()
 

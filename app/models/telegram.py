@@ -42,11 +42,19 @@ class TelegramChat(Base, TimestampMixin):
 
     Telegram chat_id is a 64-bit signed int (negative for group chats),
     so we use BigInteger.
+
+    `family_member_id` is the optional second-stage binding, set via the
+    /me command. When present, queries like "my tasks" get filtered to
+    this member; when absent, the bot falls back to family-wide results
+    with a hint to set /me.
     """
     __tablename__ = "telegram_chats"
 
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     family_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    family_member_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
 
 
 Index("ix_telegram_codes_expires_at", TelegramCode.expires_at)

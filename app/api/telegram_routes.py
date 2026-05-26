@@ -129,28 +129,61 @@ def _hhmm(m: int) -> str:
     return f"{m // 60:02d}:{m % 60:02d}"
 
 
+def _format_event_line(item: dict[str, Any], *, include_date: bool) -> str:
+    """Render a single family-event or schedule-block row as a bullet line."""
+    title = item.get("title", "(ללא כותרת)")
+    start = item.get("startMinutes")
+    end = item.get("endMinutes")
+    prefix = ""
+    if include_date and item.get("date"):
+        prefix = f"{item['date']} · "
+    time_str = ""
+    if isinstance(start, int) and isinstance(end, int):
+        time_str = f" ({_hhmm(start)}-{_hhmm(end)})"
+    location = item.get("location")
+    loc_str = f" 📍{location}" if location else ""
+    return f"• {prefix}{title}{time_str}{loc_str}"
+
+
 def _format_events_query_reply(
-    range_: str, events: list[dict[str, Any]]
+    range_: str,
+    events: list[dict[str, Any]],
+    *,
+    kid_name: str | None = None,
+    schedule_blocks: list[dict[str, Any]] | None = None,
 ) -> str:
+    """
+    Render the events query reply. When `kid_name` is set and
+    `schedule_blocks` is provided, the reply has two sections (events vs.
+    schedule) so the user can tell family appointments apart from the kid's
+    weekly classes/hobbies.
+    """
     label = _RANGE_HE.get(range_, "להיום")
+    include_date = range_ == "week"
+
+    if kid_name and schedule_blocks is not None:
+        # Kid-scoped reply: two clearly labeled sections.
+        if not events and not schedule_blocks:
+            return f"📅 אין שום דבר על הלו\"ז של {kid_name} {label}."
+        out: list[str] = []
+        if events:
+            out.append(f"📅 אירועים של {kid_name} {label}:")
+            out.extend(_format_event_line(e, include_date=include_date) for e in events)
+        if schedule_blocks:
+            if out:
+                out.append("")  # blank line between sections
+            out.append(f"📚 לוח שבועי של {kid_name}:")
+            out.extend(
+                _format_event_line(b, include_date=include_date)
+                for b in schedule_blocks
+            )
+        return "\n".join(out)
+
+    # Family-wide (no kid scope): keep the prior single-section format.
     if not events:
         return f"📅 אין אירועים {label}."
     lines = [f"📅 אירועים {label}:"]
-    for e in events:
-        title = e.get("title", "(ללא כותרת)")
-        start = e.get("startMinutes")
-        end = e.get("endMinutes")
-        # Recurring events have date=null; one-time have a "YYYY-MM-DD" date.
-        # For week view, prefix one-time events with the date to disambiguate.
-        prefix = ""
-        if range_ == "week" and e.get("date"):
-            prefix = f"{e['date']} · "
-        time_str = ""
-        if isinstance(start, int) and isinstance(end, int):
-            time_str = f" ({_hhmm(start)}-{_hhmm(end)})"
-        location = e.get("location")
-        loc_str = f" 📍{location}" if location else ""
-        lines.append(f"• {prefix}{title}{time_str}{loc_str}")
+    lines.extend(_format_event_line(e, include_date=include_date) for e in events)
     return "\n".join(lines)
 
 
@@ -167,14 +200,19 @@ def _format_grocery_query_reply(items: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _format_chores_query_reply(chores: list[dict[str, Any]]) -> str:
+def _format_chores_query_reply(
+    chores: list[dict[str, Any]], *, scoped: bool = False
+) -> str:
     if not chores:
-        return "✅ אין משימות פתוחות."
-    lines = ["📋 משימות פתוחות:"]
+        return "✅ אין משימות פתוחות שלך." if scoped else "✅ אין משימות פתוחות."
+    header = "📋 המשימות שלך:" if scoped else "📋 משימות פתוחות:"
+    lines = [header]
     for c in chores:
         title = c.get("title", "(ללא כותרת)")
         assignee = c.get("assignedTo")
-        suffix = f" — {assignee}" if assignee else ""
+        # Don't repeat the assignee when the list is already scoped to one
+        # person — they know.
+        suffix = "" if scoped else (f" — {assignee}" if assignee else "")
         lines.append(f"• {title}{suffix}")
     return "\n".join(lines)
 
@@ -202,7 +240,9 @@ async def _handle_text_message(
     Dispatch a free-text message to the right family-os endpoint and return
     the reply text to send back to the user.
     """
-    family_id = await telegram_service.get_family_for_chat(db, chat_id)
+    family_id, family_member_id = await telegram_service.get_binding_for_chat(
+        db, chat_id
+    )
     if not family_id:
         return (
             "אנא חברו את החשבון מתוך האפליקציה תחילה: "
@@ -258,17 +298,46 @@ async def _handle_text_message(
 
         if isinstance(parsed, QueryEventsIntent):
             events = await family_os_client.list_family_events(
-                family_id, range_=parsed.range
+                family_id, range_=parsed.range, kid_name=parsed.kid_name
             )
-            return _format_events_query_reply(parsed.range, events)
+            schedule_blocks: list[dict[str, Any]] | None = None
+            if parsed.kid_name:
+                # For kid-scoped queries, also fetch the kid's weekly classes/
+                # hobbies (schedule_blocks) so the bot answers the whole
+                # picture, not just family appointments.
+                schedule_blocks = await family_os_client.list_schedule_blocks(
+                    family_id, range_=parsed.range, kid_name=parsed.kid_name
+                )
+            return _format_events_query_reply(
+                parsed.range,
+                events,
+                kid_name=parsed.kid_name,
+                schedule_blocks=schedule_blocks,
+            )
 
         if isinstance(parsed, QueryGroceryIntent):
             items = await family_os_client.list_grocery(family_id)
             return _format_grocery_query_reply(items)
 
         if isinstance(parsed, QueryChoresIntent):
-            chores = await family_os_client.list_chores(family_id)
-            return _format_chores_query_reply(chores)
+            # Resolve "my" → the chat's bound member. If the user asked
+            # personal but never set /me, fall back to the family-wide view
+            # with a hint so the bot is useful, not blocking.
+            assignee_filter: str | None = None
+            mine_hint = ""
+            if parsed.mine:
+                if family_member_id:
+                    assignee_filter = family_member_id
+                else:
+                    mine_hint = (
+                        "\n\n💡 כדי לסנן רק למשימות שלך, בחר מי אתה עם הפקודה /me"
+                    )
+            chores = await family_os_client.list_chores(
+                family_id,
+                assignee_member_id=assignee_filter,
+                selected_for_today=parsed.today or None,
+            )
+            return _format_chores_query_reply(chores, scoped=parsed.mine) + mine_hint
     except httpx.HTTPStatusError as exc:
         log.warning("family-os API %s: %s", exc.response.status_code, exc.response.text[:200])
         return (
@@ -344,7 +413,10 @@ async def telegram_webhook(
                 "• \"תוסיף חלב וביצים לקניות\"\n"
                 "• \"תזכיר לעודד להוציא את הזבל\"\n"
                 "• \"תרשום פתק שהמפתחות אצל השכן\"\n"
-                "• \"מה יש לי היום?\" / \"מה ברשימת הקניות?\"",
+                "• \"מה יש לי היום?\" / \"מה ברשימת הקניות?\"\n"
+                "\n"
+                "💡 כדאי לרשום /me כדי לבחור מי אתה במשפחה — "
+                "אחר כך אדע לסנן שאלות כמו \"המשימות שלי\".",
             )
         return {"ok": True}
 
@@ -357,7 +429,85 @@ async def telegram_webhook(
             "• להוסיף לקניות: \"תוסיף לחם וחלב לרשימה\"\n"
             "• להוסיף משימה: \"תזכיר לעודד להוציא את הזבל\"\n"
             "• לרשום פתק: \"תרשום שהמפתחות אצל השכן\"\n"
-            "• לשאול: \"מה יש לי היום?\" / \"מה ברשימת הקניות?\" / \"מה המשימות?\"",
+            "• לשאול: \"מה יש לי היום?\" / \"מה ברשימת הקניות?\" / \"מה המשימות?\"\n"
+            "\n"
+            "פקודות:\n"
+            "• /me        — בחר מי אתה במשפחה (בשביל שאלות אישיות כמו \"המשימות שלי\")",
+        )
+        return {"ok": True}
+
+    # /me — bind this chat to a specific family member. Without args, list
+    # the available members with numbers. With a number, bind.
+    if text.startswith("/me"):
+        family_id_bound = await telegram_service.get_family_for_chat(db, chat_id)
+        if not family_id_bound:
+            await send_message(
+                chat_id,
+                "אנא חברו את החשבון מתוך האפליקציה תחילה (הגדרות → חבר טלגרם), "
+                "ואז שלחו /start <CODE>. אחר כך נוכל לבחור מי אתה.",
+            )
+            return {"ok": True}
+
+        # Fetch members once and store via lookup-by-number in the reply.
+        # The user picks a number from THAT list — no DB-side state needed.
+        try:
+            members = await family_os_client.list_members(family_id_bound)
+        except httpx.HTTPStatusError as exc:
+            log.warning(
+                "/me list_members %s: %s",
+                exc.response.status_code,
+                exc.response.text[:200],
+            )
+            await send_message(chat_id, "⚠️ שגיאה בטעינת רשימת המשפחה. נסו שוב בעוד רגע.")
+            return {"ok": True}
+
+        if not members:
+            await send_message(
+                chat_id,
+                "לא נמצאו בני משפחה. נסו להוסיף אותם דרך האפליקציה תחילה.",
+            )
+            return {"ok": True}
+
+        parts = text.split(maxsplit=1)
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
+        if not arg:
+            # No arg: print the numbered list.
+            lines = ["מי אתה? ענה עם המספר, למשל: /me 2", ""]
+            for i, m in enumerate(members, start=1):
+                emoji = m.get("avatarEmoji") or "👤"
+                role = m.get("role")
+                role_str = f" ({role})" if role else ""
+                lines.append(f"{i}. {emoji} {m['displayName']}{role_str}")
+            await send_message(chat_id, "\n".join(lines))
+            return {"ok": True}
+
+        # Arg given: must be a number in range.
+        try:
+            n = int(arg)
+        except ValueError:
+            await send_message(
+                chat_id, "אנא ענה במספר בלבד, למשל: /me 2"
+            )
+            return {"ok": True}
+        if not (1 <= n <= len(members)):
+            await send_message(
+                chat_id, f"מספר לא תקף. הקלד /me כדי לראות את הרשימה (1-{len(members)})."
+            )
+            return {"ok": True}
+
+        chosen = members[n - 1]
+        ok = await telegram_service.set_member_for_chat(db, chat_id, chosen["id"])
+        if not ok:
+            await send_message(
+                chat_id, "⚠️ לא הצלחתי לשמור את הבחירה. נסו שוב."
+            )
+            return {"ok": True}
+        emoji = chosen.get("avatarEmoji") or "👤"
+        await send_message(
+            chat_id,
+            f"✅ נשמר. אני יודע שאתה {emoji} {chosen['displayName']}.\n"
+            f"עכשיו אפשר לשאול \"מה המשימות שלי?\" ואני אדע מי לחפש.",
         )
         return {"ok": True}
 

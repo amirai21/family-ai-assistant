@@ -77,6 +77,10 @@ class NoteIntent(BaseModel):
 class QueryEventsIntent(BaseModel):
     intent: Literal["query_events"] = "query_events"
     range: Literal["today", "tomorrow", "week"] = "today"
+    # Optional Hebrew kid name to scope to ("של דני", "לבן"). When set, the
+    # bot fetches both kid-assigned family-events AND the kid's schedule_blocks
+    # (classes/hobbies). Server-side name lookup → kid_id.
+    kid_name: str | None = None
 
 
 class QueryGroceryIntent(BaseModel):
@@ -85,6 +89,14 @@ class QueryGroceryIntent(BaseModel):
 
 class QueryChoresIntent(BaseModel):
     intent: Literal["query_chores"] = "query_chores"
+    # True when the user said "שלי" / "אני" / similar — bot should filter to
+    # the member bound to this chat (via /me). False = all family chores.
+    mine: bool = False
+    # True when the user said "היום" — bot should filter to selectedForToday=true.
+    # "מחר" doesn't map cleanly to the chores schema (no due-date), so the
+    # LLM treats "tomorrow" as "today=false" too (returns all undone) — see
+    # the system prompt.
+    today: bool = False
 
 
 class UnsupportedIntent(BaseModel):
@@ -192,12 +204,22 @@ Intents:
 
 5. "query_events" — the user is ASKING what's scheduled (not creating
    anything). Triggers: "מה יש לי היום", "מה יש מחר", "מה התוכניות לשבוע",
-   "אילו אירועים יש השבוע", "מה יש בלוח".
+   "אילו אירועים יש השבוע", "מה יש בלוח", "מה יש לדני השבוע".
    Fields:
-     range — ONE of "today" / "tomorrow" / "week".
-             Default: "today" if the user said "היום" or didn't specify a
-             timeframe; "tomorrow" for "מחר"; "week" for "השבוע" / "בימים
-             הקרובים".
+     range    — ONE of "today" / "tomorrow" / "week".
+                Default: "today" if the user said "היום" or didn't specify a
+                timeframe; "tomorrow" for "מחר"; "week" for "השבוע" / "בימים
+                הקרובים".
+     kid_name — Hebrew name of a kid, ONLY when the user named one
+                ("לדני", "של נועה", "מה יש לבן השבוע"). Strip prefixes:
+                "לדני" → "דני", "של נועה" → "נועה". Leave null if the user
+                didn't name a kid.
+   Examples:
+     "מה יש לי היום?"             → {range:"today"}
+     "מה יש מחר?"                 → {range:"tomorrow"}
+     "מה יש בשבוע הקרוב?"          → {range:"week"}
+     "מה יש לדני השבוע?"          → {range:"week", kid_name:"דני"}
+     "אילו אירועים יש לנועה היום" → {range:"today", kid_name:"נועה"}
 
 6. "query_grocery" — the user is ASKING what's on the shopping list.
    Triggers: "מה ברשימת הקניות", "מה צריך לקנות", "מה יש בקניות",
@@ -206,8 +228,18 @@ Intents:
 
 7. "query_chores" — the user is ASKING what tasks are open.
    Triggers: "מה המשימות הפתוחות", "מה יש לי לעשות", "אילו מטלות יש",
-   "מה צריך לעשות בבית".
-   No fields beyond the intent name.
+   "מה צריך לעשות בבית", "מה המטלות שלי", "מה אני צריך לעשות היום".
+   Fields:
+     mine  — true if the user phrased it as personal ("שלי" / "אני צריך/ה"
+             / "לי לעשות"). Default false (all family chores).
+     today — true if the user said "היום". Default false. ("מחר" maps to
+             false too — chores have no due-date in the data model, so
+             "tomorrow's tasks" is the same as "open tasks".)
+   Examples:
+     "מה המשימות שלי להיום?"   → {mine:true,  today:true}
+     "מה יש לי לעשות?"          → {mine:true,  today:false}
+     "מה המטלות הפתוחות?"      → {mine:false, today:false}
+     "מה צריך לעשות היום בבית?" → {mine:false, today:true}
 
 8. "unsupported" — the request is something else (projects, kids' schedules,
    general chat, deleting/updating existing items). Reply with a short
