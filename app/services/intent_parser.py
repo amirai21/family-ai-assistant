@@ -123,6 +123,15 @@ You are an extraction layer for a Hebrew-language family-coordination bot.
 The user sends free-form Hebrew text. Your job: choose EXACTLY ONE intent
 from the list below and emit JSON matching that intent's schema.
 
+CRITICAL: every response MUST include a top-level "intent" field whose value
+is EXACTLY one of:
+  "family_event" | "grocery" | "chore" | "note" |
+  "query_events" | "query_grocery" | "query_chores" | "unsupported"
+
+If you omit the "intent" field the bot cannot route the message and the
+user gets a generic error. Always include it, in every example, on every
+intent, even when other fields make the intent "obvious" from context.
+
 Intents:
 
 1. "family_event" — the user wants to schedule a one-time event for the
@@ -141,12 +150,16 @@ Intents:
                        21:00 (1260).
      end_minutes    — minutes since midnight (1–1440). Must be > start_minutes.
      location       — optional, only if explicitly stated.
+   Examples:
+     "תקבע מסיבת תה ב-15 לאפריל ב-14:00" →
+       {"intent":"family_event","title":"מסיבת תה","date":"2027-04-15","start_minutes":840,"end_minutes":900}
+     "פגישה מחר ב-9 בבוקר במשרד" →
+       {"intent":"family_event","title":"פגישה","date":"<tomorrow>","start_minutes":540,"end_minutes":600,"location":"המשרד"}
 
 2. "grocery" — the user wants to add one or more items to the shopping list.
    Field:
      items — list of objects, one per item the user mentioned. EXTRACT
-             EVERY ITEM, not just the first. For "תוסיף עגבניות וביצים"
-             return [{"title":"עגבניות"},{"title":"ביצים"}].
+             EVERY ITEM, not just the first.
              Per-item fields:
                 title — short Hebrew name of the item.
                 qty   — optional, the quantity as text (e.g. "2", "ליטר",
@@ -168,6 +181,11 @@ Intents:
                          explicitly says "לרשימת ניקיון"/"לחומרי ניקוי"/
                          "לפארם"/"לרוקחות" — use that category for ALL
                          items in the message.
+   Examples:
+     "תוסיף עגבניות וביצים" →
+       {"intent":"grocery","items":[{"title":"עגבניות","shopping_category":"grocery"},{"title":"ביצים","shopping_category":"grocery"}]}
+     "תוסיף חלב וביצים לקניות" →
+       {"intent":"grocery","items":[{"title":"חלב","shopping_category":"grocery"},{"title":"ביצים","shopping_category":"grocery"}]}
 
 3. "chore" — the user wants to add a household to-do / chore (something
    one person needs to DO, with no specific time). Distinguish from
@@ -181,9 +199,12 @@ Intents:
                     named one ("עודד", "אמא", "הילדים"). Leave null if
                     unspecified or generic ("מישהו"/"כולם").
    Examples:
-     "תזכיר לעודד להוציא את הזבל" → {title:"להוציא את הזבל", assigned_to:"עודד"}
-     "אני צריך לעבור על החשבונות"  → {title:"לעבור על החשבונות"}
-     "תוסיף משימה לקנות מתנה לסבתא" → {title:"לקנות מתנה לסבתא"}
+     "תזכיר לעודד להוציא את הזבל" →
+       {"intent":"chore","title":"להוציא את הזבל","assigned_to":"עודד"}
+     "אני צריך לעבור על החשבונות" →
+       {"intent":"chore","title":"לעבור על החשבונות"}
+     "תוסיף משימה לקנות מתנה לסבתא" →
+       {"intent":"chore","title":"לקנות מתנה לסבתא"}
 
 4. "note" — the user wants to save a free-form note / reminder / piece of
    info for the family. Distinguish from "chore" by the absence of an
@@ -196,39 +217,53 @@ Intents:
      title — optional short title, ONLY if the user explicitly named one
              ("פתק עם הכותרת X", "תוסיף פתק שכותרתו…"). Otherwise null.
    Examples:
-     "תרשום פתק שהמפתחות אצל השכן" → {body:"המפתחות אצל השכן"}
-     "תזכור שיש לנו את הוואי-פיי חדש: SSID FamilyOS, סיסמה 12345"
-                                  → {body:"וואי-פיי חדש: SSID FamilyOS, סיסמה 12345"}
-     "תעלה לי במחברת את מספר השרברב 050-1234567"
-                                  → {body:"מספר השרברב 050-1234567"}
+     "תרשום פתק שהמפתחות אצל השכן" →
+       {"intent":"note","body":"המפתחות אצל השכן"}
+     "תזכור שיש לנו את הוואי-פיי חדש: SSID FamilyOS, סיסמה 12345" →
+       {"intent":"note","body":"וואי-פיי חדש: SSID FamilyOS, סיסמה 12345"}
+     "תעלה לי במחברת את מספר השרברב 050-1234567" →
+       {"intent":"note","body":"מספר השרברב 050-1234567"}
 
 5. "query_events" — the user is ASKING what's scheduled (not creating
-   anything). Triggers: "מה יש לי היום", "מה יש מחר", "מה התוכניות לשבוע",
-   "אילו אירועים יש השבוע", "מה יש בלוח", "מה יש לדני השבוע".
+   anything). Triggers: ANY question word ("מה" / "איזה" / "איזו" /
+   "אילו" / "כמה") combined with events/schedule words ("אירועים",
+   "תוכניות", "לוח זמנים") and/or a timeframe ("היום", "מחר", "השבוע",
+   "בשבוע הבא", a specific weekday).
    Fields:
      range    — ONE of "today" / "tomorrow" / "week".
-                Default: "today" if the user said "היום" or didn't specify a
-                timeframe; "tomorrow" for "מחר"; "week" for "השבוע" / "בימים
-                הקרובים".
+                Map: "היום" → today; "מחר" → tomorrow; "השבוע" / "בימים
+                הקרובים" / "בשבוע הבא" / a specific weekday → week. Default
+                "today" if no timeframe.
      kid_name — Hebrew name of a kid, ONLY when the user named one
                 ("לדני", "של נועה", "מה יש לבן השבוע"). Strip prefixes:
                 "לדני" → "דני", "של נועה" → "נועה". Leave null if the user
                 didn't name a kid.
    Examples:
-     "מה יש לי היום?"             → {range:"today"}
-     "מה יש מחר?"                 → {range:"tomorrow"}
-     "מה יש בשבוע הקרוב?"          → {range:"week"}
-     "מה יש לדני השבוע?"          → {range:"week", kid_name:"דני"}
-     "אילו אירועים יש לנועה היום" → {range:"today", kid_name:"נועה"}
+     "מה יש לי היום?" →
+       {"intent":"query_events","range":"today"}
+     "מה יש מחר?" →
+       {"intent":"query_events","range":"tomorrow"}
+     "איזה ארועים יש לנו שבוע הבא ביום שני?" →
+       {"intent":"query_events","range":"week"}
+     "אילו אירועים יש לי השבוע?" →
+       {"intent":"query_events","range":"week"}
+     "מה יש לדני השבוע?" →
+       {"intent":"query_events","range":"week","kid_name":"דני"}
+     "איזה אירועים יש לנועה היום" →
+       {"intent":"query_events","range":"today","kid_name":"נועה"}
 
 6. "query_grocery" — the user is ASKING what's on the shopping list.
    Triggers: "מה ברשימת הקניות", "מה צריך לקנות", "מה יש בקניות",
-   "מה חסר במכולת".
+   "מה חסר במכולת", "איזה קניות יש".
    No fields beyond the intent name.
+   Examples:
+     "מה ברשימת הקניות?" → {"intent":"query_grocery"}
+     "מה צריך לקנות?"    → {"intent":"query_grocery"}
 
 7. "query_chores" — the user is ASKING what tasks are open.
-   Triggers: "מה המשימות הפתוחות", "מה יש לי לעשות", "אילו מטלות יש",
-   "מה צריך לעשות בבית", "מה המטלות שלי", "מה אני צריך לעשות היום".
+   Triggers: ANY question word ("מה" / "איזה" / "איזו" / "אילו" / "כמה")
+   combined with chores/tasks words ("משימות", "מטלות", "מה צריך לעשות",
+   "מה יש לי לעשות").
    Fields:
      mine  — true if the user phrased it as personal ("שלי" / "אני צריך/ה"
              / "לי לעשות"). Default false (all family chores).
@@ -236,18 +271,28 @@ Intents:
              false too — chores have no due-date in the data model, so
              "tomorrow's tasks" is the same as "open tasks".)
    Examples:
-     "מה המשימות שלי להיום?"   → {mine:true,  today:true}
-     "מה יש לי לעשות?"          → {mine:true,  today:false}
-     "מה המטלות הפתוחות?"      → {mine:false, today:false}
-     "מה צריך לעשות היום בבית?" → {mine:false, today:true}
+     "מה המשימות שלי להיום?" →
+       {"intent":"query_chores","mine":true,"today":true}
+     "איזה משימות יש להיום?" →
+       {"intent":"query_chores","mine":false,"today":true}
+     "מה יש לי לעשות?" →
+       {"intent":"query_chores","mine":true,"today":false}
+     "מה המטלות הפתוחות?" →
+       {"intent":"query_chores","mine":false,"today":false}
+     "מה צריך לעשות היום בבית?" →
+       {"intent":"query_chores","mine":false,"today":true}
 
 8. "unsupported" — the request is something else (projects, kids' schedules,
-   general chat, deleting/updating existing items). Reply with a short
-   Hebrew `reason`, e.g.
-   "אני יודע להוסיף ולשאול לגבי אירועים, קניות, משימות ופתקים — שאר הדברים עוד לא".
+   general chat, deleting/updating existing items).
+   Field:
+     reason — short Hebrew message the bot will show the user.
+   Example:
+     "מה מזג האוויר?" →
+       {"intent":"unsupported","reason":"אני יודע להוסיף ולשאול לגבי אירועים, קניות, משימות ופתקים — שאר הדברים עוד לא."}
 
 Rules:
 - ALWAYS return valid JSON matching ONE of the schemas above.
+- ALWAYS include the top-level "intent" field (see CRITICAL above).
 - NEVER add fields not in the schema.
 - Hebrew text only in user-visible fields.
 - If multiple intents could apply, pick the one the user spent more words
@@ -305,7 +350,7 @@ async def parse_intent(text: str) -> ParsedIntent:
     except Exception as exc:  # noqa: BLE001
         return UnsupportedIntent(reason=f"שגיאת LLM: {exc}")
 
-    intent = raw.get("intent")
+    intent = raw.get("intent") or _infer_intent_from_shape(raw)
     try:
         if intent == "family_event":
             return FamilyEventIntent.model_validate(raw)
@@ -329,3 +374,42 @@ async def parse_intent(text: str) -> ParsedIntent:
     return UnsupportedIntent(
         reason="לא הצלחתי להבין את הבקשה. נסו לנסח אחרת."
     )
+
+
+def _infer_intent_from_shape(raw: dict[str, Any]) -> str | None:
+    """
+    Defense in depth: gpt-4o-mini sometimes drops the explicit `intent`
+    field when the surrounding fields make the intent obvious (see the
+    prompt's "CRITICAL" rule which it's *supposed* to follow). Map the
+    shape back to an intent so the dispatch still works.
+
+    Field disambiguation (kept narrow — must be unique per intent):
+      items                        → grocery
+      body                         → note
+      start_minutes / end_minutes  → family_event  (chore has no time)
+      range                        → query_events  (chore has no range)
+      mine / today                 → query_chores
+      assigned_to or just title    → chore
+      only `reason`                → unsupported
+    """
+    keys = set(raw.keys())
+    if "items" in keys:
+        return "grocery"
+    if "body" in keys:
+        return "note"
+    if "start_minutes" in keys or "end_minutes" in keys:
+        return "family_event"
+    if "range" in keys:
+        return "query_events"
+    if "mine" in keys or "today" in keys:
+        return "query_chores"
+    if "assigned_to" in keys:
+        return "chore"
+    if keys == {"reason"} or keys == {"reason", "intent"}:
+        return "unsupported"
+    # `title` alone is ambiguous between chore and family_event; if we got
+    # here neither time nor assignee was present, lean chore (the safer
+    # default — a missed time is more recoverable than a missed reminder).
+    if "title" in keys:
+        return "chore"
+    return None
