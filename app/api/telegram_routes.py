@@ -124,9 +124,34 @@ def _format_note_reply(intent: NoteIntent) -> str:
 
 _RANGE_HE = {"today": "להיום", "tomorrow": "למחר", "week": "לשבוע הקרוב"}
 
+# Sun=0 … Sat=6, matching family_events / schedule_blocks daysOfWeek.
+_HE_DAYS = ["יום א׳", "יום ב׳", "יום ג׳", "יום ד׳", "יום ה׳", "יום ו׳", "שבת"]
+
 
 def _hhmm(m: int) -> str:
     return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def _day_prefix(item: dict[str, Any]) -> str:
+    """
+    A leading day label for week-view lines. One-time items carry a `date`
+    ("YYYY-MM-DD"); recurring items carry `daysOfWeek` (Sun=0..Sat=6). Without
+    this, recurring weekly activities render with only a time ("17:00-18:00"),
+    which is useless in a week view — you can't tell which day they fall on.
+    """
+    date = item.get("date")
+    if date:
+        return f"{date} · "
+    days = item.get("daysOfWeek")
+    if isinstance(days, list) and days:
+        labels = [
+            _HE_DAYS[d]
+            for d in sorted(set(days))
+            if isinstance(d, int) and 0 <= d <= 6
+        ]
+        if labels:
+            return f"{'/'.join(labels)} · "
+    return ""
 
 
 def _format_event_line(item: dict[str, Any], *, include_date: bool) -> str:
@@ -134,9 +159,9 @@ def _format_event_line(item: dict[str, Any], *, include_date: bool) -> str:
     title = item.get("title", "(ללא כותרת)")
     start = item.get("startMinutes")
     end = item.get("endMinutes")
-    prefix = ""
-    if include_date and item.get("date"):
-        prefix = f"{item['date']} · "
+    # Only prefix the day in week view — in today/tomorrow views the day is
+    # implied by the question.
+    prefix = _day_prefix(item) if include_date else ""
     time_str = ""
     if isinstance(start, int) and isinstance(end, int):
         time_str = f" ({_hhmm(start)}-{_hhmm(end)})"
