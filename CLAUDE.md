@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 
 The Telegram-bot brain for **Family OS** — a Hebrew RTL family-management app. This service receives Telegram webhook updates, parses Hebrew natural language with OpenAI, and creates events / grocery items in family-os via its REST API.
 
-**This is the sibling repo to `family-os`** (`github.com/amirai21/family-os`). The user's main repo on disk is `/Users/amirkoblyansky/family-os`. That CLAUDE.md has the broader architecture; this one focuses on the Assistant.
+**This is the sibling repo to `family-os`** (`github.com/amirkubla/family-os`). The user's main repo on disk is `/Users/amirkoblyansky/family-os`. That CLAUDE.md has the broader architecture; this one focuses on the Assistant.
 
 | | |
 |---|---|
